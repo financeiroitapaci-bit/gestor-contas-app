@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Contas - Itapaci</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .form-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        button:hover { transform: scale(1.05); }
+        .transaction-item {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status { color: #10b981; font-weight: bold; }
+        .loading { text-align: center; padding: 20px; color: #667eea; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏦 Gestor de Contas - Itapaci/GO</h1>
+        
+        <div class="form-card">
+            <h2>Nova Transação</h2>
+            <form id="transaction-form">
+                <select id="account-id" required>
+                    <option value="">Selecione uma conta</option>
+                    <option value="1">FMAS - Fundo Municipal de Assistência Social</option>
+                    <option value="2">FME - Fundo Municipal de Educação</option>
+                    <option value="3">FMS - Fundo Municipal de Saúde</option>
+                    <option value="4">FPM - Fundo de Participação dos Municípios</option>
+                </select>
+                <input type="text" id="description" placeholder="Descrição da transação" required>
+                <input type="number" id="amount" placeholder="Valor (R$)" step="0.01" required>
+                <button type="submit">Adicionar Transação</button>
+            </form>
+        </div>
+        
+        <div>
+            <h2>Transações Recentes <span class="status" id="status">● Sincronizado</span></h2>
+            <div id="transactions-list" class="loading">Carregando...</div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://kgwgovbokrggqyaflobq.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_xeS3d_NFqLVm=1PLpxn1CA_Fi7cC';
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        async function loadTransactions() {
+            const { data, error } = await db
+                .from('transactions')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            
+            if (error) {
+                document.getElementById('transactions-list').innerHTML = 
+                    '<p style="color:red;">Erro ao carregar: ' + error.message + '</p>';
+                return;
+            }
+            
+            displayTransactions(data);
+        }
+
+        function displayTransactions(transactions) {
+            const list = document.getElementById('transactions-list');
+            if (!transactions || transactions.length === 0) {
+                list.innerHTML = '<p>Nenhuma transação encontrada.</p>';
+                return;
+            }
+            
+            list.innerHTML = transactions.map(t => `
+                <div class="transaction-item">
+                    <h3>${t.description}</h3>
+                    <p><strong>Valor:</strong> R$ ${parseFloat(t.amount).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                    <p><strong>Conta ID:</strong> ${t.account_id}</p>
+                    <p><small>${new Date(t.created_at).toLocaleString('pt-BR')}</small></p>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('transaction-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const button = e.target.querySelector('button');
+            button.textContent = 'Salvando...';
+            button.disabled = true;
+            
+            const { error } = await db.from('transactions').insert([{
+                account_id: parseInt(document.getElementById('account-id').value),
+                description: document.getElementById('description').value,
+                amount: parseFloat(document.getElementById('amount').value)
+            }]);
+            
+            button.textContent = 'Adicionar Transação';
+            button.disabled = false;
+            
+            if (error) {
+                alert('Erro ao adicionar: ' + error.message);
+            } else {
+                document.getElementById('transaction-form').reset();
+                document.getElementById('status').textContent = '● Salvo!';
+                setTimeout(() => {
+                    document.getElementById('status').textContent = '● Sincronizado';
+                }, 2000);
+            }
+        });
+
+        // REALTIME - Atualização automática
+        db.channel('transactions-changes')
+            .on('postgres_changes', 
+                { event: '*', schema: 'public', table: 'transactions' },
+                (payload) => {
+                    console.log('Mudança detectada:', payload);
+                    document.getElementById('status').textContent = '● Atualizando...';
+                    loadTransactions();
+                    setTimeout(() => {
+                        document.getElementById('status').textContent = '● Sincronizado';
+                    }, 1000);
+                }
+            )
+            .subscribe();
+
+        loadTransactions();
+    </script>
+</body>
+</html>
